@@ -1,3 +1,4 @@
+# 3) Live-serial “main()” example
 import struct
 import time
 
@@ -13,13 +14,12 @@ BITS      = 10
 S_HIGH    = 16000
 S_LOW     = 16000
 
-ADC_SCALE = V_REF / (2**BITS - 1)
-# sizes in bytes:
+ADC_SCALE  = V_REF / (2**BITS - 1)
 BYTES_HIGH = S_HIGH * 2
 BYTES_TH   = 4
 BYTES_LOW  = S_LOW  * 2
 BYTES_TL   = 4
-BYTES_AG   = 2
+BYTES_AG   = 4             # float32
 EXPECTED   = BYTES_HIGH + BYTES_TH + BYTES_LOW + BYTES_TL + BYTES_AG
 
 def pt1000_lookup(R):
@@ -42,49 +42,38 @@ def main():
         print(f"Got {len(buf)} / {EXPECTED} bytes")
         return
 
-    # parse the two voltage phases & times
-    idx = 0
-    vh = np.frombuffer(buf[idx:idx+BYTES_HIGH], dtype=np.uint16)
-    idx += BYTES_HIGH
+    idx    = 0
+    vh     = np.frombuffer(buf[idx:idx+BYTES_HIGH], dtype=np.uint16); idx += BYTES_HIGH
+    th     = struct.unpack("<I", buf[idx:idx+BYTES_TH])[0];             idx += BYTES_TH
+    vl     = np.frombuffer(buf[idx:idx+BYTES_LOW], dtype=np.uint16);   idx += BYTES_LOW
+    tl     = struct.unpack("<I", buf[idx:idx+BYTES_TL])[0]
 
-    th = struct.unpack("<I", buf[idx:idx+BYTES_TH])[0]
-    idx += BYTES_TH
+    # unpack float32
+    avg_ct = struct.unpack('<f', buf[-BYTES_AG:])[0]
 
-    vl = np.frombuffer(buf[idx:idx+BYTES_LOW], dtype=np.uint16)
-    idx += BYTES_LOW
+    # time & voltage
+    dt_h   = th / S_HIGH
+    dt_l   = tl / S_LOW
+    t_h    = np.arange(S_HIGH) * dt_h
+    t_l    = np.arange(S_LOW)  * dt_l + t_h[-1] + dt_h
+    v_h    = vh * ADC_SCALE
+    v_l    = vl * ADC_SCALE
 
-    tl = struct.unpack("<I", buf[idx:idx+BYTES_TL])[0]
-    # idx += BYTES_TL  # not used further
+    # temp
+    v_th   = avg_ct * ADC_SCALE
+    R_th   = 1000 * v_th / (V_REF - v_th)
+    T_deg  = pt1000_lookup(R_th)
 
-    # — grab the averaged thermistor count from the last 2 bytes —
-    avg_ct = struct.unpack('<H', buf[-BYTES_AG:])[0]
-
-    # build time axes
-    dt_high = th / S_HIGH
-    dt_low  = tl / S_LOW
-    t_high  = np.arange(S_HIGH) * dt_high
-    t_low   = np.arange(S_LOW)  * dt_low + t_high[-1] + dt_high
-
-    # convert volts
-    v_h = vh * ADC_SCALE
-    v_l = vl * ADC_SCALE
-
-    # temperature
-    v_th = avg_ct * ADC_SCALE
-    R_th = 1000 * v_th / (V_REF - v_th)
-    T    = pt1000_lookup(R_th)
-
-    # plot
-    print(f"High-speed: avg {dt_high:.2f} µs/sample")
-    print(f"Low-speed:  avg {dt_low:.2f} µs/sample")
-    print(f"{T:.1f} °C")
+    print(f"High-speed: {dt_h:.2f} µs/sample")
+    print(f"Low-speed : {dt_l:.2f} µs/sample")
+    print(f"{T_deg:.1f} °C")
 
     plt.figure(figsize=(10,6))
-    plt.plot(t_high, v_h, label="High-speed")
-    plt.plot(t_low,  v_l, label="Low-speed")
+    plt.plot(t_h, v_h, label="High-speed")
+    plt.plot(t_l, v_l, label="Low-speed")
     plt.xlabel("Time (µs)")
     plt.ylabel("Voltage (V)")
-    plt.title(f"Decay Curve @ {T:.1f}°C")
+    plt.title(f"Decay Curve @ {T_deg:.1f}°C")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()

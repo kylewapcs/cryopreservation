@@ -59,7 +59,7 @@ with open(CSV_OUT, 'w', newline='') as f:
         writer.writerow([i, times[i], voltages[i], therm_readings[i]])
 
 start = CONFIRM_SAMPLES
-N_fit = 16000 # samples to include in fit
+N_fit = 16384 # samples to include in fit
 
 
 t_fit = times[start:start+N_fit] * 1e-6  # us → seconds

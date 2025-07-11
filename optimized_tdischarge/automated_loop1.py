@@ -1,3 +1,4 @@
+# 1) Live-logging loop (uses get_teensy_raw + parse_packet)
 import serial
 import struct
 import time
@@ -6,21 +7,21 @@ import os
 import numpy as np
 
 # ---- CONFIG ----
-PORT      = 'COM9'
-BAUDRATE  = 115200
-TIMEOUT   = 5
+PORT        = 'COM9'
+BAUDRATE    = 115200
+TIMEOUT     = 5
 
-V_REF     = 3.3
-ADC_MAX   = 1023.0
-R_REF     = 1000.0  # Ω
+V_REF       = 3.3
+ADC_MAX     = 1023.0
+R_REF       = 1000.0  # Ω
 
-S_HIGH    = 16000
-S_LOW     = 16000
-BYTES_H   = S_HIGH * 2
-BYTES_TH  = 4
-BYTES_L   = S_LOW  * 2
-BYTES_TL  = 4
-BYTES_AG  = 2
+S_HIGH      = 16000
+S_LOW       = 16000
+BYTES_H     = S_HIGH * 2
+BYTES_TH    = 4
+BYTES_L     = S_LOW  * 2
+BYTES_TL    = 4
+BYTES_AG    = 4                    # now sending float32
 TOTAL_BYTES = BYTES_H + BYTES_TH + BYTES_L + BYTES_TL + BYTES_AG
 
 RAW_DIR = r'C:\Users\klipk\Downloads\raw_heatdata_logs'
@@ -38,16 +39,16 @@ def get_teensy_raw(ser):
     ser.write(b'S')
     time.sleep(0.05)
     buf = ser.read(TOTAL_BYTES)
-    return buf if len(buf)==TOTAL_BYTES else None
+    return buf if len(buf) == TOTAL_BYTES else None
 
 def parse_packet(raw):
-    idx = 0
-    vh     = np.frombuffer(raw[idx:idx+BYTES_H], dtype=np.uint16); idx += BYTES_H
-    t_high = struct.unpack('<I', raw[idx:idx+4])[0];           idx += 4
-    vl     = np.frombuffer(raw[idx:idx+BYTES_L], dtype=np.uint16); idx += BYTES_L
-    t_low  = struct.unpack('<I', raw[idx:idx+BYTES_TL])[0]
-    # always pull the true avg from the last two bytes
-    avg_ct = struct.unpack('<H', raw[-BYTES_AG:])[0]
+    idx     = 0
+    vh      = np.frombuffer(raw[idx:idx+BYTES_H], dtype=np.uint16); idx += BYTES_H
+    t_high  = struct.unpack('<I', raw[idx:idx+BYTES_TH])[0];         idx += BYTES_TH
+    vl      = np.frombuffer(raw[idx:idx+BYTES_L], dtype=np.uint16); idx += BYTES_L
+    t_low   = struct.unpack('<I', raw[idx:idx+BYTES_TL])[0]
+    # pull the 4-byte float at the end:
+    avg_ct  = struct.unpack('<f', raw[-BYTES_AG:])[0]
     return vh, t_high, vl, t_low, avg_ct
 
 def compute_temperature(avg_count):
@@ -60,7 +61,8 @@ def next_filename(base="teensy_raw", ext="bin"):
     while True:
         f = f"{base}_{i}.{ext}"
         p = os.path.join(RAW_DIR, f)
-        if not os.path.exists(p): return p, f
+        if not os.path.exists(p):
+            return p, f
         i += 1
 
 def loop_log_raw_data():
@@ -75,17 +77,18 @@ def loop_log_raw_data():
             raw = get_teensy_raw(ser)
             if raw:
                 path, fname = next_filename()
-                with open(path, 'wb') as f: f.write(raw)
+                with open(path, 'wb') as f:
+                    f.write(raw)
+
                 vh, t_high, vl, t_low, avg_ct = parse_packet(raw)
                 T = compute_temperature(avg_ct)
-
                 dt_high = t_high / S_HIGH
                 dt_low  = t_low  / S_LOW
 
                 print(f"[{count:03d}] Saved {fname} | "
                       f"T = {T:.1f} °C | "
-                      f"HS rate ~ {dt_high:.2f} us/sample | "
-                      f"LS rate ~ {dt_low:.2f} us/sample")
+                      f"HS rate ~ {dt_high:.2f} µs/sample | "
+                      f"LS rate ~ {dt_low:.2f} µs/sample")
                 count += 1
             else:
                 print("[X] Skipped bad packet")
