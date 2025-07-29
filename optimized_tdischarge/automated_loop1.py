@@ -15,7 +15,7 @@ V_REF       = 3.3
 ADC_MAX     = 1023.0
 R_REF       = 1000.0  # Ω
 
-S_HIGH      = 16000
+S_HIGH      = 1000
 S_LOW       = 16000
 BYTES_H     = S_HIGH * 2
 BYTES_TH    = 4

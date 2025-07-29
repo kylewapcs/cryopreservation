@@ -16,7 +16,7 @@ V_REF       = 3.3
 ADC_MAX     = 1023.0
 R_REF       = 1000.0
 
-S_HIGH      = 16000
+S_HIGH      = 1000
 S_LOW       = 16000
 BYTES_H     = S_HIGH * 2
 BYTES_TH    = 4
@@ -67,27 +67,45 @@ if __name__ == "__main__":
     vh, t_high, vl, t_low, avg_count = get_teensy_data()
 
     dt_h = t_high / S_HIGH
-    dt_l = t_low  / S_LOW
-    t_h  = np.arange(S_HIGH) * dt_h
-    t_l  = t_h[-1] + dt_h + np.arange(S_LOW) * dt_l
+    dt_l = (t_low - t_high)  / S_LOW
+    t_h  = np.arange(S_HIGH) * dt_h + dt_h
+    t_l  = t_h[-1] + dt_h + np.arange(S_LOW) * dt_l + dt_l
 
     v_h  = vh * (V_REF / ADC_MAX)
-    v_l  = vl * (V_REF / ADC_MAX)
+    v_l  = vl * (V_REF / 4095.0)
 
     V_th = avg_count / ADC_MAX * V_REF
     R_th = R_REF * V_th / (V_REF - V_th)
     T_C = pt1000_lookup(R_th)
+    v_offset = v_l[-1]
+    
+    normal = v_h[0]
+    v_l = v_l - v_offset
+    v_h = v_h - v_offset
+
+    v_h = v_h / (normal - v_offset)
+    v_l = v_l / (normal - v_offset)
+
+    V_th = avg_count / ADC_MAX * V_REF
+    R_th = R_REF * V_th / (V_REF - V_th)
+    T_C = pt1000_lookup(R_th)
+    ## 
 
     print(f"High-speed: {dt_h:.2f} µs/sample")
     print(f"Low-speed : {dt_l:.2f} µs/sample")
     print(f"Temperature: {T_C:.1f} °C")
-
+    print(np.average(v_h))
+    print(np.average(v_l))
+    print(v_offset)
     plt.figure(figsize=(10,6))
     plt.plot(t_h, v_h, label="High-speed")
     plt.plot(t_l, v_l, label="Low-speed")
     plt.xlabel("Time (µs)")
     plt.ylabel("Voltage (V)")
     plt.title(f"Decay Curve @ {T_C:.1f}°C")
+    plt.xscale('linear')
+    plt.xlim(0,1e5)
+    plt.yscale('log')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()

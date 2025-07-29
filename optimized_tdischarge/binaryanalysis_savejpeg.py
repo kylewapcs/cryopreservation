@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # ---- CONFIG ----
-FILE_PATH = r'C:\Users\klipk\Downloads\raw_heatdata_logs\teensy_raw_119.bin'
+FILE_PATH = r'C:\Users\klipk\Downloads\raw_heatdata_logs\teensy_raw_1.bin'
 
 V_REF   = 3.3
 ADC_MAX = 1023.0
@@ -60,6 +60,32 @@ v_low   = vl * (V_REF / ADC_MAX)
 v_th    = avg_ct / ADC_MAX * V_REF
 R_th    = R_REF * v_th / (V_REF - v_th)
 T_deg   = pt1000_lookup(R_th)
+
+def calculate_capacitance(t_us, v, R_ohm):
+    t = t_us * 1e-6   # now in seconds
+
+    # limit fit to the “clean” exponential region:
+    # here I pick v > 5% of V0 to avoid floor/noise
+    v0 = v[0]
+    mask = (v > 0.05*v0) & (v < v0)
+    t_fit = t[mask]
+    v_fit = v[mask]
+
+    # linearize: ln(V/V0) = -t/(R C)
+    ln_ratio = np.log(v_fit / v0)
+
+    # slope = d/dt [ln(V/V0)] = -1/(R C)
+    slope, intercept = np.polyfit(t_fit, ln_ratio, 1)
+    tau_s = -1.0 / slope       # in seconds
+    C_F   = tau_s / R_ohm * 1e12     # in farads
+
+    # return both in familiar units
+    return float(C_F)     # tau back to microseconds
+
+t_all = np.concatenate((th_ax, tl_ax))
+v_all = np.concatenate((v_high, v_low))
+print(calculate_capacitance(t_all, v_all, 1000000))
+print(T_deg)
 
 plt.figure(figsize=(10,6))
 plt.plot(th_ax, v_high, label="High-speed")
