@@ -1,9 +1,6 @@
-# 4) get_teensy_data() + plotting
 import serial
 import struct
 import time
-import os
-
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -13,24 +10,29 @@ BAUDRATE    = 115200
 TIMEOUT     = 5
 
 V_REF       = 3.3
-ADC_MAX     = 1023.0
+ADC_MAX_10  = 1023.0
+ADC_MAX_12  = 4095.0
 R_REF       = 1000.0
 
-S_HIGH      = 1000
+S_HIGH      = 50
+S_LOW1 = 1200
 S_LOW       = 16000
+
 BYTES_H     = S_HIGH * 2
 BYTES_TH    = 4
-BYTES_L     = S_LOW  * 2
-BYTES_TL    = 4
-BYTES_AG    = 4               # float32
-TOTAL_BYTES = BYTES_H + BYTES_TH + BYTES_L + BYTES_TL + BYTES_AG
+BYTES_L     = S_LOW * 2
+BYTES_TL1   = 4  # totalLow1
+BYTES_TL2   = 4  # totalLow2 (totalLow)
+BYTES_AG    = 4  # avgTherm (float32)
+
+TOTAL_BYTES = BYTES_H + BYTES_TH + BYTES_L + BYTES_TL1 + BYTES_TL2 + BYTES_AG
 
 def pt1000_lookup(R):
     T_ref = np.array([-79, -70, -60, -50, -40, -30,
-                      -20, -10,   0,  10,  20,  30])
+                      -20, -10, 0, 10, 20, 30])
     R_ref = np.array([687.30, 723.30, 763.30, 803.10,
                       842.70, 882.20, 921.60, 960.90,
-                      1000.00,1039.00,1077.90,1116.70])
+                      1000.00, 1039.00, 1077.90, 1116.70])
     return np.interp(R, R_ref, T_ref)
 
 def get_teensy_data():
@@ -45,78 +47,91 @@ def get_teensy_data():
         if len(raw) != TOTAL_BYTES:
             raise RuntimeError(f"Expected {TOTAL_BYTES} bytes, got {len(raw)}")
 
-    idx       = 0
-    vh        = np.frombuffer(raw[idx:idx+BYTES_H],   dtype=np.uint16); idx += BYTES_H
-    t_high    = struct.unpack('<I',  raw[idx:idx+BYTES_TH])[0];       idx += BYTES_TH
-    vl        = np.frombuffer(raw[idx:idx+BYTES_L],   dtype=np.uint16); idx += BYTES_L
-    t_low     = struct.unpack('<I',  raw[idx:idx+BYTES_TL])[0];       idx += BYTES_TL
-    avg_count = struct.unpack('<f',  raw[idx:idx+BYTES_AG])[0]        # float32
+    idx = 0
+    vh = np.frombuffer(raw[idx:idx+BYTES_H], dtype=np.uint16)
+    idx += BYTES_H
+    t_high = struct.unpack('<I', raw[idx:idx+BYTES_TH])[0]
+    idx += BYTES_TH
+    vl = np.frombuffer(raw[idx:idx+BYTES_L], dtype=np.uint16)
+    idx += BYTES_L
+    totalLow1 = struct.unpack('<I', raw[idx:idx+BYTES_TL1])[0]
+    idx += BYTES_TL1
+    totalLow = struct.unpack('<I', raw[idx:idx+BYTES_TL2])[0]
+    idx += BYTES_TL2
+    avg_count = struct.unpack('<f', raw[idx:idx+BYTES_AG])[0]
 
-    return vh, t_high, vl, t_low, avg_count
+    return vh, t_high, vl, totalLow1, totalLow, avg_count
 
 if __name__ == "__main__":
-    vh, t_high, vl, t_low, avg_count = get_teensy_data()
+    vh, t_high, vl, totalLow1, totalLow, avg_count = get_teensy_data()
 
-    dt_h = t_high / S_HIGH
-    dt_l = (t_low - t_high)  / S_LOW
-    t_h  = np.arange(S_HIGH) * dt_h + dt_h
-    t_l  = t_h[-1] + dt_h + np.arange(S_LOW) * dt_l + dt_l
+    # Calculate time per sample for high-speed
+    dt_h = t_high / S_HIGH  # microseconds per sample
 
-    v_h  = vh * (V_REF / ADC_MAX)
-    v_l  = vl * (V_REF / 4095.0)
+    # For low-speed: split into two phases
+    # Phase 1: first 150 samples
+    dt_l1 = totalLow1 / S_LOW1
 
-    V_th = avg_count / ADC_MAX * V_REF
-    R_th = R_REF * V_th / (V_REF - V_th)
-    T_C = pt1000_lookup(R_th)
-    v_offset = v_l[-1]
-    
+    # Phase 2: remaining samples
+    dt_l2 = (totalLow - totalLow1) / (S_LOW - 1200)
+
+    # Build time arrays (microseconds)
+    t_h = np.arange(S_HIGH) * dt_h + dt_h
+
+    t_l1 = t_h[-1] + dt_h + np.arange(1200) * dt_l1 + dt_l1
+    t_l2 = t_l1[-1] + dt_l1 + np.arange(S_LOW - 1200) * dt_l2 + dt_l2
+
+    t_l = np.concatenate((t_l1, t_l2))
+
+    # Convert ADC values to voltages
+    v_h = vh * (V_REF / ADC_MAX_10)        # high-speed 10-bit ADC
+    v_l = vl * (V_REF / ADC_MAX_12)        # low-speed 12-bit ADC
+
+    # Normalize signals by first high-speed sample (assumed stable voltage)
     normal = v_h[0]
-    v_l = v_l - v_offset
-    v_h = v_h - v_offset
+    v_h = v_h / 3.3
+    v_l = v_l / 3.3
 
-    v_h = v_h / (normal - v_offset)
-    v_l = v_l / (normal - v_offset)
-
-    V_th = avg_count / ADC_MAX * V_REF
+    # Calculate temperature from thermistor voltage
+    V_th = avg_count / ADC_MAX_10 * V_REF
     R_th = R_REF * V_th / (V_REF - V_th)
     T_C = pt1000_lookup(R_th)
-    ## 
+
+    # Function to calculate capacitance from RC decay fit
     def calculate_capacitance(t_us, v, R_ohm):
-            t = t_us * 1e-6   # now in seconds
+        t = t_us * 1e-6  # convert us to seconds
 
-    # limit fit to the “clean” exponential region:
-    # here I pick v > 5% of V0 to avoid floor/noise
-            v0 = v[0]
-            mask = (v > 0.05*v0) & (v < v0)
-            t_fit = t[mask]
-            v_fit = v[mask]
+        v0 = v[0]
+        mask = (v > 0.05 * v0) & (v < v0)
+        t_fit = t[mask]
+        v_fit = v[mask]
 
-    # linearize: ln(V/V0) = -t/(R C)
-            ln_ratio = np.log(v_fit / v0)
+        ln_ratio = np.log(v_fit / v0)
+        slope, _ = np.polyfit(t_fit, ln_ratio, 1)
+        tau_s = -1.0 / slope  # seconds
+        C_F = tau_s / R_ohm * 1e12  # Farads to pF
 
-    # slope = d/dt [ln(V/V0)] = -1/(R C)
-            slope, intercept = np.polyfit(t_fit, ln_ratio, 1)
-            tau_s = -1.0 / slope       # in seconds
-            C_F   = tau_s / R_ohm * 1e12     # in farads
-
-    # return both in familiar units
-            return float(C_F)     # tau back to microseconds
+        return float(C_F)
 
     t_all = np.concatenate((t_h, t_l))
     v_all = np.concatenate((v_h, v_l))
-    print(f'Capacitance (pF): {calculate_capacitance(t_h, v_h, 1000000)}')
-    print(f"High-speed: {dt_h:.2f} µs/sample")
-    print(f"Low-speed : {dt_l:.2f} µs/sample")
+
+    print(f'Capacitance (pF): {calculate_capacitance(t_h[:100], v_h[:100], 1000000)}')
+    print(f"High-speed sample interval: {dt_h:.2f} µs/sample")
+    print(f"Low-speed phase 1 sample interval: {dt_l1:.2f} µs/sample")
+    print(f"Low-speed phase 2 sample interval: {dt_l2:.2f} µs/sample")
     print(f"Temperature: {T_C:.1f} °C")
+
     plt.figure(figsize=(10,6))
     plt.plot(t_h, v_h, label="High-speed")
-    plt.plot(t_l, v_l, label="Low-speed")
+    plt.plot(t_l1, v_l[:1200], label="Low-speed phase 1 (no averaging)")
+    plt.plot(t_l2, v_l[1200:], label="Low-speed phase 2 (averaged)")
     plt.xlabel("Time (µs)")
-    plt.ylabel("Voltage (V)")
+    plt.ylabel("Normalized Voltage (V/V0)")
     plt.title(f"Decay Curve @ {T_C:.1f}°C")
-    plt.xscale('linear')
-    plt.xlim(0,1e5)
+    plt.xlim(1, 1e6)
     plt.yscale('log')
+    plt.xscale('linear')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
