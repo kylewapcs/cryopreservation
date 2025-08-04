@@ -129,7 +129,7 @@ if __name__ == "__main__":
     plt.xlabel("Time (µs)")
     plt.ylabel("Normalized Voltage (V/V0)")
     plt.title(f"Decay Curve @ {T_C:.1f}°C")
-    plt.xlim(1, 1e6)
+    plt.xlim(1, 100)
     plt.yscale('log')
     plt.xscale('linear')
     plt.legend()
