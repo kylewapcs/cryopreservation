@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # ---- CONFIG ----
-FILE_PATH = r'C:\Users\klipk\Downloads\test2_logs\teensy_raw_300.bin'
+FILE_PATH = r'C:\Users\klipk\Downloads\test7_logs\teensy_raw_5.bin'
 
 V_REF   = 3.3
 ADC_MAX_10 = 1023.0

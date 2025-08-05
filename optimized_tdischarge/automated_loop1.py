@@ -4,6 +4,7 @@ import time
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.optimize import root_scalar
 
 # ---- CONFIG ----
 PORT        = 'COM9'
@@ -27,16 +28,34 @@ BYTES_AG    = 4
 
 TOTAL_BYTES = BYTES_H + BYTES_TH + BYTES_L + BYTES_TL1 + BYTES_TL2 + BYTES_AG
 
-RAW_DIR = r'C:\Users\klipk\Downloads\test6_logs'
+RAW_DIR = r'C:\Users\klipk\Downloads\test8_logs'
 os.makedirs(RAW_DIR, exist_ok=True)
 
-def pt1000_lookup(R):
-    T_ref = np.array([-79, -70, -60, -50, -40, -30,
-                      -20, -10, 0, 10, 20, 30])
-    R_ref = np.array([687.30, 723.30, 763.30, 803.10,
-                      842.70, 882.20, 921.60, 960.90,
-                      1000.00, 1039.00, 1077.90, 1116.70])
-    return np.interp(R, R_ref, T_ref)
+R0 = 1000.0  # Ohms for Pt1000
+A = 3.9083e-3
+B = -5.775e-7
+C_neg = -4.183e-12  # Only used for T < 0
+
+def pt1000_lookup(R_measured):
+    """
+    Given resistance R in ohms, return the corresponding temperature in °C
+    using the inverse of the Callendar–Van Dusen equation for Pt1000.
+    """
+    def R_of_T(T):
+        C = C_neg if T < 0 else 0.0
+        return R0 * (1 + A*T + B*T**2 + C*(T - 100)*T**3)
+
+    # Define the root function: R(T) - R_measured = 0
+    def residual(T):
+        return R_of_T(T) - R_measured
+
+    # Try solving between -200°C and 850°C (valid for Pt1000)
+    sol = root_scalar(residual, bracket=[-200, 850], method='brentq')
+
+    if sol.converged:
+        return sol.root
+    else:
+        return None  # Or raise an error if desired
 
 def get_teensy_raw(ser):
     ser.write(b'S')
