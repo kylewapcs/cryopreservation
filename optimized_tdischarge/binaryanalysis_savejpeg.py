@@ -63,6 +63,7 @@ dt_low2 = (totalLow2 - totalLow1) / (S_LOW - 1200.0)  # remaining samples
 
 th_ax = np.arange(S_HIGH) * dt_high
 tl_ax1 = th_ax[-1] + dt_high + np.arange(1200) * dt_low1
+
 tl_ax2 = tl_ax1[-1] + dt_low1 + np.arange(S_LOW - 1200) * dt_low2
 
 # Voltages
@@ -94,14 +95,16 @@ capacitance_pf = calculate_capacitance(t_all, v_all, 1000000)
 print(f"Estimated capacitance: {capacitance_pf:.2f} pF")
 print(f"Temperature: {T_deg:.2f} °C")
 
+
+
 plt.figure(figsize=(10, 6))
 plt.plot(th_ax, v_high, label="High-speed")
 plt.plot(tl_ax1, v_low1, label="Low-speed part 1")
 plt.plot(tl_ax2, v_low2, label="Low-speed part 2")
 plt.xlabel("Time (µs)")
 plt.ylabel("Voltage (V)")
-plt.xscale('log')
-plt.xlim(10, 1000000)
+plt.xscale('linear')
+plt.xlim(0, 50)
 plt.ylim(0.01, 5)
 plt.yscale('log')
 plt.title(f"Decay Curve @ {T_deg:.1f} °C")
